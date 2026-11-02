@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Inspection Report Generator</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{--bg:#eef1f4;--surface:#fff;--sunk:#f6f8fa;--ink:#16202b;--muted:#5b6876;--line:#d5dbe2;--accent:#1d5fa8;--accent-ink:#fff;
+  --ok:#2f7d4f;--ok-bg:#e3f2e8;--warn:#9a6100;--warn-bg:#fbefd6;--bad:#b3261e;--bad-bg:#fbe3e1;
+  --display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;--body:"Barlow","Segoe UI",Arial,sans-serif;--mono:"IBM Plex Mono",Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#0f151b;--surface:#17202a;--sunk:#121a22;--ink:#e4eaf0;--muted:#93a1b0;--line:#2a3644;--accent:#6aa5e8;--accent-ink:#0b1420;
+  --ok:#6cc28f;--ok-bg:#14301f;--warn:#e3b04b;--warn-bg:#33270f;--bad:#f08079;--bad-bg:#3a1714;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--body);padding:20px max(16px,env(safe-area-inset-left)) 40px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header{border-bottom:2px solid var(--ink);padding-bottom:12px}
+h1{font:700 2.4rem/1 var(--display);margin:0;text-transform:uppercase}
+.sub{margin:6px 0 0;color:var(--muted);max-width:70ch}
+h2{font:600 1.05rem var(--display);letter-spacing:.08em;text-transform:uppercase;margin:0;color:var(--muted)}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+textarea{width:100%;min-height:240px;font:13px/1.5 var(--mono);background:var(--sunk);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:10px;resize:vertical}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{font:600 .9rem var(--body);background:var(--accent);color:var(--accent-ink);border:0;border-radius:4px;padding:9px 14px;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
+.btn:disabled{opacity:.5;cursor:default}
+.status{font:500 .85rem var(--mono);color:var(--accent)}
+.err{color:var(--bad);margin:0}
+.step{border-left:3px solid var(--line);padding-left:12px;display:flex;flex-direction:column;gap:8px}
+.step.live{border-left-color:var(--accent)}
+.step-h{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px}
+.step-h b{font:600 1.05rem var(--display);letter-spacing:.04em;text-transform:uppercase}
+.meta{font:.75rem var(--mono);color:var(--muted)}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.86rem}
+th,td{text-align:left;padding:6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:500;color:var(--muted);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase}
+td.n,th.n{text-align:right;font-family:var(--mono)}
+tr.flagged td{background:var(--bad-bg)}
+.pill{display:inline-block;font:700 .7rem var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border-radius:3px;white-space:nowrap}
+.invented,.altered{color:var(--bad);background:var(--bad-bg)}
+.missing{color:var(--warn);background:var(--warn-bg)}
+.okp{color:var(--ok);background:var(--ok-bg)}
+ul.flags{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+ul.flags li{display:flex;gap:8px;align-items:baseline}
+.big{display:flex;gap:24px;flex-wrap:wrap}
+.big div{display:flex;flex-direction:column}
+.big .num{font:700 2.6rem/1 var(--display)}
+.big .lbl{font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.note{font-size:.85rem;color:var(--muted);margin:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Inspection Report Generator</h1>
+    <p class="sub">Paste rough field notes. Model A (OpenAI GPT) structures them into findings. Model B (Mistral, a different provider) checks those findings against the original notes and flags anything missing, invented or altered. Download the result as a PDF.</p>
+  </header>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Field notes</h2>
+      <div class="row">
+        <span class="note">Test notes:</span>
+        <button class="btn ghost" data-sample="0" type="button">Note 1 · GT#2 HGP</button>
+        <button class="btn ghost" data-sample="1" type="button">Note 2 · HRSG</button>
+        <button class="btn ghost" data-sample="2" type="button">Note 3 · LO system</button>
+      </div>
+      <textarea id="notes" placeholder="e.g. stg 1 nozzle vane #22 LE burn approx 3-4mm..."></textarea>
+      <div class="row">
+        <button class="btn" id="run" type="button">Generate report</button>
+        <button class="btn ghost" id="runAll" type="button">Run all 3 test notes</button>
+        <button class="btn ghost" id="pdf" type="button" disabled>Download PDF</button>
+      </div>
+      <p class="status" id="status"></p>
+      <p class="err" id="err" hidden></p>
+      <p class="note">Uses the free keyless Pollinations API, which allows 1 reply every 45 s per IP. The page waits automatically; the wait is timed separately from model time.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Results · all reports this session</h2>
+      <div class="big">
+        <div><span class="num" id="mErr">0</span><span class="lbl">Errors caught by Model B</span></div>
+        <div><span class="num" id="mFind">0</span><span class="lbl">Findings flagged</span></div>
+        <div><span class="num" id="mAvg">–</span><span class="lbl">Avg total time / report</span></div>
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>Report</th><th class="n">Findings</th><th class="n">Errors</th><th class="n">Model A</th><th class="n">Model B</th><th class="n">Rate wait</th><th class="n">Total</th></tr></thead>
+        <tbody id="runsBody"><tr><td colspan="7" class="note">No reports yet.</td></tr></tbody>
+      </table></div>
+      <button class="btn ghost" id="clear" type="button">Clear results</button>
+    </section>
+  </div>
+
+  <section class="panel" id="out" hidden>
+    <h2 id="outTitle">Report</h2>
+    <div class="step" id="sA">
+      <div class="step-h"><b>Model A · OpenAI · Structured findings</b><span class="meta" id="metaA"></span></div>
+      <div class="tw"><table>
+        <thead><tr><th>#</th><th>Location</th><th>Defect</th><th>Measurement</th><th>Status</th><th>Model B check</th></tr></thead>
+        <tbody id="findBody"></tbody>
+      </table></div>
+    </div>
+    <div class="step" id="sB">
+      <div class="step-h"><b>Model B · Mistral · Verification</b><span class="meta" id="metaB"></span></div>
+      <ul class="flags" id="flagList"></ul>
+      <p class="note" id="verdict"></p>
+    </div>
+  </section>
+</div>
+
+<script>
+const SAMPLES = [
+`GT#2 hot gas path borescope insp 14/10, insp by RK
+stg 1 nozzle (S1N) vane #22 LE burn approx 3-4mm x ~12mm, loc 6 o'clock, chk vs last insp
+S1N vanes 14-17 TE cracks, faint, n/a length, dye pen TBD
+comb can #7 cap plate hole ~2mm dia, no cracks, OK
+S1B blk shroud rub witness marks 360deg approx 0.5mm? unclear depth
+fuel nozzle #3 tip carbon buildup, DP? no, cleaned pre-insp
+TBC spall on TP aft ~25mm dia, loc unclear w/ pic blurry`,
+`HRSG LP drum area walkdown 1/11, team B
+6" CS line HP-214 near elbow, wall ~7.1mm (nom 8.6?) UT, prev was 8.2 in 2023, recheck req
+support SH-88 loose, ~5mm gap, grout n/a
+insul jacket torn ~300mm x 150mm, no ext corr visible
+gauge reads 48 bar on PI-214A vs 4.8 MPa on DCS, units mixed?
+flange gasket weeping slight on FL-19, bolt torque chk, OK
+vent line V-07 fine, no defect`,
+`LO system + brg area, Unit 1, walk 28/10
+brg #1 LO drain screen, sludge + small metal fines, 1 chunk maybe babbitt?? ambig
+LO cooler E-102 tube leak? DP across filter 14psi vs 0.8 bar elsewhere, check
+TG rotor journal #2 scoring approx 0.02mm, not sure if real or light reflection
+jacking oil pump motor vib ~4.5 mm/s, OK
+exhaust duct exp joint seal torn ~40cm, insul missing around it
+coupling guard bolts 2 of 8 missing, blk
+vent valve packing minor leak, n/a`];
+
+const $ = (id) => document.getElementById(id);
+let busy = false, current = null, runs = [];
+try { runs = JSON.parse(localStorage.getItem("irg-runs") || "[]"); } catch { runs = []; }
+const save = () => { try { localStorage.setItem("irg-runs", JSON.stringify(runs)); } catch {} };
+const fmt = (ms) => ms == null ? "–" : (ms / 1000).toFixed(1) + " s";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const status = (t) => { $("status").textContent = t; };
+const setErr = (t) => { $("err").textContent = t || ""; $("err").hidden = !t; };
+
+async function callModel(model, prompt, label) {
+  let waitMs = 0;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const t0 = performance.now();
+    const res = await fetch("https://text.pollinations.ai/", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], seed: Math.floor(Math.random() * 1e9), max_tokens: 6000, reasoning_effort: "low" }),
+    });
+    const text = await res.text();
+    const limited = res.status === 429 || /free limit reached/i.test(text.slice(0, 200));
+    if (limited) {
+      const m = text.match(/wait (\d+) seconds/i);
+      const secs = (m ? Number(m[1]) : 45) + 2;
+      const w0 = performance.now();
+      for (let s = secs; s > 0; s--) { status(`${label}: free-tier rate limit, retrying in ${s}s`); await sleep(1000); }
+      waitMs += performance.now() - w0 + (performance.now() - t0 - (performance.now() - w0));
+      continue;
+    }
+    if (!res.ok) throw new Error(`${label} failed (HTTP ${res.status}). Try again.`);
+    return { text, ms: Math.round(performance.now() - t0), waitMs: Math.round(waitMs) };
+  }
+  throw new Error(`${label} is still rate limited. Wait a minute, then try again.`);
+}
+
+function parseJSON(text) {
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const src = fence ? fence[1] : text;
+  const m = src.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("Model reply had no JSON.");
+  return JSON.parse(m[0]);
+}
+
+const promptA = (notes) => `You are an inspection report writer for power-plant equipment. Convert the engineer's rough field notes below into structured findings. Expand abbreviations (LE = leading edge, TE = trailing edge, DP = differential pressure, UT = ultrasonic testing, etc.). One finding per distinct observation, including items noted as OK or fine. Copy measurements exactly as written with units; if none, use "not recorded". Never add information that is not in the notes.
+
+Reply with only this JSON:
+{"title":"short report title","date":"date from notes or not recorded","findings":[{"id":1,"location":"...","defect":"...","measurement":"...","status":"defect|ok|unclear","source":"exact fragment of the notes this came from"}]}
+
+FIELD NOTES:
+"""
+${notes}
+"""`;
+
+const promptB = (notes, findings) => `You are an independent QA reviewer. Compare the STRUCTURED FINDINGS against the ORIGINAL FIELD NOTES. Flag every error:
+- "invented": a finding, location, number or detail that is not supported by the notes
+- "altered": a value, unit, location or meaning that was changed from the notes
+- "missing": an observation or measurement in the notes that no finding captures
+Be strict and specific. Do not flag pure abbreviation expansions or rewording that keeps the meaning.
+
+Reply with only this JSON:
+{"flags":[{"finding_id":1,"type":"invented|altered|missing","detail":"what is wrong, quoting the notes"}],"verdict":"one sentence overall assessment"}
+Use "finding_id": null for missing items.
+
+ORIGINAL FIELD NOTES:
+"""
+${notes}
+"""
+
+STRUCTURED FINDINGS:
+${JSON.stringify(findings, null, 1)}`;
+
+function td(text, cls) { const c = document.createElement("td"); c.textContent = text == null ? "" : String(text); if (cls) c.className = cls; return c; }
+function pill(type) { const s = document.createElement("span"); s.className = "pill " + (type === "ok" ? "okp" : type); s.textContent = type; return s; }
+
+function renderReport(r) {
+  $("out").hidden = false;
+  $("outTitle").textContent = "Report · " + (r.title || "Inspection");
+  $("metaA").textContent = r.aMs != null ? `${fmt(r.aMs)} · ${r.findings.length} findings` : "running";
+  $("metaB").textContent = r.bMs != null ? `${fmt(r.bMs)} · ${r.flags.length} errors flagged` : (r.findings.length ? "running" : "waiting");
+  const fb = $("findBody"); fb.replaceChildren();
+  for (const f of r.findings) {
+    const tr = document.createElement("tr");
+    const fl = r.flags.filter((x) => Number(x.finding_id) === Number(f.id));
+    if (fl.length) tr.className = "flagged";
+    const chk = document.createElement("td");
+    if (r.bMs == null) chk.textContent = "…";
+    else if (!fl.length) chk.append(pill("ok"));
+    else fl.forEach((x) => { chk.append(pill(x.type), " "); });
+    tr.append(td(f.id), td(f.location), td(f.defect), td(f.measurement), td(f.status), chk);
+    fb.append(tr);
+  }
+  const ul = $("flagList"); ul.replaceChildren();
+  if (r.bMs != null && !r.flags.length) { const li = document.createElement("li"); li.append(pill("ok"), " No errors found."); ul.append(li); }
+  for (const x of r.flags) {
+    const li = document.createElement("li");
+    const sp = document.createElement("span"); sp.textContent = (x.finding_id != null ? `Finding ${x.finding_id}: ` : "Not captured: ") + String(x.detail || "");
+    li.append(pill(x.type), sp); ul.append(li);
+  }
+  $("verdict").textContent = r.verdict || "";
+  $("sA").classList.toggle("live", r.aMs == null);
+  $("sB").classList.toggle("live", r.aMs != null && r.bMs == null);
+}
+
+function renderRuns() {
+  const body = $("runsBody"); body.replaceChildren();
+  if (!runs.length) { const tr = document.createElement("tr"); const c = td("No reports yet.", "note"); c.colSpan = 7; tr.append(c); body.append(tr); }
+  for (const r of runs) {
+    const tr = document.createElement("tr");
+    tr.append(td(r.title), td(r.nFind, "n"), td(r.nErr, "n"), td(fmt(r.aMs), "n"), td(fmt(r.bMs), "n"), td(fmt(r.waitMs), "n"), td(fmt(r.totalMs), "n"));
+    body.append(tr);
+  }
+  $("mErr").textContent = runs.reduce((s, r) => s + r.nErr, 0);
+  $("mFind").textContent = runs.reduce((s, r) => s + r.nFlaggedFindings, 0);
+  $("mAvg").textContent = runs.length ? fmt(runs.reduce((s, r) => s + r.totalMs, 0) / runs.length) : "–";
+}
+
+async function generate(notes, label) {
+  const t0 = performance.now();
+  const r = { notes, title: label, findings: [], flags: [], verdict: "", aMs: null, bMs: null };
+  current = r; renderReport(r);
+  status(`${label}: Model A (OpenAI) structuring notes…`);
+  const a = await callModel("openai", promptA(notes), "Model A");
+  const ja = parseJSON(a.text);
+  r.title = String(ja.title || label); r.date = String(ja.date || "not recorded");
+  r.findings = (Array.isArray(ja.findings) ? ja.findings : []).map((f, i) => ({
+    id: Number(f.id) || i + 1, location: String(f.location || ""), defect: String(f.defect || ""),
+    measurement: String(f.measurement || ""), status: String(f.status || ""),
+  }));
+  r.aMs = a.ms; renderReport(r);
+  status(`${label}: Model B (Mistral) verifying against notes…`);
+  const b = await callModel("mistral", promptB(notes, r.findings), "Model B");
+  const jb = parseJSON(b.text);
+  r.flags = (Array.isArray(jb.flags) ? jb.flags : []).map((x) => ({
+    finding_id: x.finding_id == null ? null : Number(x.finding_id),
+    type: ["invented", "altered", "missing"].includes(String(x.type)) ? String(x.type) : "altered",
+    detail: String(x.detail || ""),
+  }));
+  r.verdict = String(jb.verdict || "");
+  r.bMs = b.ms; r.waitMs = a.waitMs + b.waitMs; r.totalMs = Math.round(performance.now() - t0);
+  renderReport(r);
+  runs.push({ title: r.title, nFind: r.findings.length, nErr: r.flags.length,
+    nFlaggedFindings: new Set(r.flags.filter((x) => x.finding_id != null).map((x) => x.finding_id)).size,
+    aMs: r.aMs, bMs: r.bMs, waitMs: r.waitMs, totalMs: r.totalMs });
+  save(); renderRuns();
+  $("pdf").disabled = false;
+  status(`${label}: done in ${fmt(r.totalMs)} (${fmt(r.aMs + r.bMs)} model time).`);
+}
+
+async function guarded(fn) {
+  if (busy) return;
+  busy = true; setErr("");
+  ["run", "runAll"].forEach((id) => $(id).disabled = true);
+  try { await fn(); } catch (e) { setErr(e.message || String(e)); status(""); }
+  finally { busy = false; ["run", "runAll"].forEach((id) => $(id).disabled = false); }
+}
+
+function downloadPDF() {
+  const r = current; if (!r || r.bMs == null) return;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const W = 210, M = 15, CW = W - 2 * M; let y = 18;
+  const line = (t, size = 10, style = "normal", color = [22, 32, 43]) => {
+    doc.setFont("helvetica", style); doc.setFontSize(size); doc.setTextColor(...color);
+    const lines = doc.splitTextToSize(String(t), CW);
+    for (const l of lines) { if (y > 280) { doc.addPage(); y = 18; } doc.text(l, M, y); y += size * 0.45; }
+    y += 1.5;
+  };
+  line("INSPECTION REPORT", 18, "bold");
+  line(r.title, 12, "bold");
+  line(`Date: ${r.date || "not recorded"}    Generated: ${new Date().toLocaleString()}`, 9, "normal", [91, 104, 118]);
+  line(`Model A: OpenAI GPT (structuring)  |  Model B: Mistral (verification)  |  Total time ${fmt(r.totalMs)}`, 9, "normal", [91, 104, 118]);
+  y += 3; line("FINDINGS", 12, "bold");
+  for (const f of r.findings) {
+    const fl = r.flags.filter((x) => x.finding_id === f.id);
+    line(`${f.id}. ${f.location}`, 10, "bold");
+    line(`Defect: ${f.defect}`); line(`Measurement: ${f.measurement}    Status: ${f.status}`);
+    if (fl.length) fl.forEach((x) => line(`QA FLAG (${x.type.toUpperCase()}): ${x.detail}`, 9, "bold", [179, 38, 30]));
+    else line("QA: verified against notes", 9, "normal", [47, 125, 79]);
+    y += 1;
+  }
+  const missing = r.flags.filter((x) => x.finding_id == null);
+  y += 2; line("QA REVIEW (MODEL B)", 12, "bold");
+  line(`Errors flagged: ${r.flags.length} (${missing.length} missing from findings)`);
+  missing.forEach((x) => line(`MISSING: ${x.detail}`, 9, "bold", [154, 97, 0]));
+  if (r.verdict) line(`Verdict: ${r.verdict}`);
+  y += 2; line("ORIGINAL FIELD NOTES", 12, "bold");
+  doc.setFont("courier", "normal"); line(r.notes, 8, "normal", [91, 104, 118]);
+  doc.save((r.title || "inspection-report").replace(/[^a-z0-9]+/gi, "-").toLowerCase() + ".pdf");
+}
+
+document.querySelectorAll("[data-sample]").forEach((b) => b.onclick = () => { $("notes").value = SAMPLES[Number(b.dataset.sample)]; });
+$("run").onclick = () => guarded(async () => {
+  const notes = $("notes").value.trim();
+  if (!notes) throw new Error("Paste field notes first, or load a test note.");
+  await generate(notes, "Report " + (runs.length + 1));
+});
+$("runAll").onclick = () => guarded(async () => {
+  for (let i = 0; i < 3; i++) { $("notes").value = SAMPLES[i]; await generate(SAMPLES[i], "Test note " + (i + 1)); }
+});
+$("pdf").onclick = downloadPDF;
+$("clear").onclick = () => { runs = []; save(); renderRuns(); };
+$("notes").value = SAMPLES[0];
+renderRuns();
+</script>
+</body>
+</html>
