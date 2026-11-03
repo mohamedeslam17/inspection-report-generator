@@ -57,7 +57,7 @@ ul.flags li{display:flex;gap:8px;align-items:baseline}
 <div class="wrap">
   <header>
     <h1>Inspection Report Generator</h1>
-    <p class="sub">Paste rough field notes. Model A (OpenAI GPT) structures them into findings. Model B (Mistral, a different provider) checks those findings against the original notes and flags anything missing, invented or altered. Download the result as a PDF.</p>
+    <p class="sub">Paste rough field notes. Model A (OpenAI GPT) structures them into findings. Model B (Mistral when available, otherwise GPT-OSS) independently checks those findings against the original notes and flags anything missing, invented or altered. Download the result as a PDF.</p>
   </header>
 
   <div class="grid">
@@ -105,7 +105,7 @@ ul.flags li{display:flex;gap:8px;align-items:baseline}
       </table></div>
     </div>
     <div class="step" id="sB">
-      <div class="step-h"><b>Model B · Mistral · Verification</b><span class="meta" id="metaB"></span></div>
+      <div class="step-h"><b>Model B · Verification</b><span class="meta" id="metaB"></span></div>
       <ul class="flags" id="flagList"></ul>
       <p class="note" id="verdict"></p>
     </div>
@@ -164,7 +164,7 @@ async function callModel(model, prompt, label) {
       waitMs += performance.now() - w0 + (performance.now() - t0 - (performance.now() - w0));
       continue;
     }
-    if (!res.ok) throw new Error(`${label} failed (HTTP ${res.status}). Try again.`);
+    if (!res.ok) { const e = new Error(`${label} failed (HTTP ${res.status}). Try again.`); e.status = res.status; throw e; }
     return { text, ms: Math.round(performance.now() - t0), waitMs: Math.round(waitMs) };
   }
   throw new Error(`${label} is still rate limited. Wait a minute, then try again.`);
@@ -213,7 +213,7 @@ function renderReport(r) {
   $("out").hidden = false;
   $("outTitle").textContent = "Report · " + (r.title || "Inspection");
   $("metaA").textContent = r.aMs != null ? `${fmt(r.aMs)} · ${r.findings.length} findings` : "running";
-  $("metaB").textContent = r.bMs != null ? `${fmt(r.bMs)} · ${r.flags.length} errors flagged` : (r.findings.length ? "running" : "waiting");
+  $("metaB").textContent = r.bMs != null ? `${r.bModel} · ${fmt(r.bMs)} · ${r.flags.length} errors flagged` : (r.findings.length ? "running" : "waiting");
   const fb = $("findBody"); fb.replaceChildren();
   for (const f of r.findings) {
     const tr = document.createElement("tr");
@@ -264,8 +264,16 @@ async function generate(notes, label) {
     measurement: String(f.measurement || ""), status: String(f.status || ""),
   }));
   r.aMs = a.ms; renderReport(r);
-  status(`${label}: Model B (Mistral) verifying against notes…`);
-  const b = await callModel("mistral", promptB(notes, r.findings), "Model B");
+  status(`${label}: Model B verifying against notes…`);
+  let b, bModel = "mistral";
+  try { b = await callModel("mistral", promptB(notes, r.findings), "Model B"); }
+  catch (e) {
+    if (e.status !== 404 && e.status !== 400) throw e;
+    bModel = "openai-fast (GPT-OSS)";
+    status(`${label}: Mistral unavailable on the free tier, verifying with GPT-OSS…`);
+    b = await callModel("openai-fast", promptB(notes, r.findings), "Model B");
+  }
+  r.bModel = bModel;
   const jb = parseJSON(b.text);
   r.flags = (Array.isArray(jb.flags) ? jb.flags : []).map((x) => ({
     finding_id: x.finding_id == null ? null : Number(x.finding_id),
@@ -305,7 +313,7 @@ function downloadPDF() {
   line("INSPECTION REPORT", 18, "bold");
   line(r.title, 12, "bold");
   line(`Date: ${r.date || "not recorded"}    Generated: ${new Date().toLocaleString()}`, 9, "normal", [91, 104, 118]);
-  line(`Model A: OpenAI GPT (structuring)  |  Model B: Mistral (verification)  |  Total time ${fmt(r.totalMs)}`, 9, "normal", [91, 104, 118]);
+  line(`Model A: OpenAI GPT (structuring)  |  Model B: ${r.bModel} (verification)  |  Total time ${fmt(r.totalMs)}`, 9, "normal", [91, 104, 118]);
   y += 3; line("FINDINGS", 12, "bold");
   for (const f of r.findings) {
     const fl = r.flags.filter((x) => x.finding_id === f.id);
